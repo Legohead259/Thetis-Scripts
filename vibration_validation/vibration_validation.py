@@ -71,25 +71,32 @@ scope_accel = df.voltage * SCALE_FACTOR # Scale all the voltage values to accele
 # ===========================
 
 
-with open('data/log_054_3_6Hz.bin', 'rb') as file:
+with open('data/log_023.bin', 'rb') as file:
     epoch_data = []
     raw_accel_data = []
     accel_data = []
+    lat_data = []
+    lon_data = []
+    fix_data = []
 
     data = ThetisData()
     while file.readinto(data) == sizeof(data):
         timestamp = dt.datetime.utcfromtimestamp(data.epoch) + dt.timedelta(milliseconds=data.mSecond)
         epoch_data.append(timestamp)
-        raw_accel_data.append((data.rawAccelX))
+        # raw_accel_data.append((data.rawAccelX))
         # accel_data.append((data.accelX, data.accelY, data.accelZ))
-        accel_data.append(data.accelX)
+        # accel_data.append(data.accelX)
+        lat_data.append(data.latitude)
+        lon_data.append(data.longitude)
+        fix_data.append(data.GPSFix)
+        
 
 # Generate theoretical sinusoidal data
-# START_INDEX = 0
-START_INDEX = 233
-# TIME_WIDTH = len(epoch_data)
-TIME_WIDTH = 22
-END_INDEX = START_INDEX + TIME_WIDTH
+START_INDEX = 0
+# START_INDEX = 233
+TIME_WIDTH = len(epoch_data)
+# TIME_WIDTH = 22
+# END_INDEX = START_INDEX + TIME_WIDTH
 
 x_meas = [epoch_data[START_INDEX + x]-epoch_data[START_INDEX] for x in range(TIME_WIDTH)]
 x_meas = [x_meas[x].total_seconds() for x in range(TIME_WIDTH)]
@@ -122,6 +129,11 @@ ax_scale.plot(df.time, scope_accel*2.8)
 ax_scale.set_xlabel("Time [s]")
 ax_scale.set_ylabel("Accelerations [m/s/s]")
 ax_scale.legend(["Thetis (Raw)", "Reference (x2.8)"])
+
+# print(fix_data)
+print(np.mean(lat_data))
+print(np.mean(lon_data))
+plt.plot(lat_data, lon_data, 'o')
 
 print("Number of samples: ", len(epoch_data)) #DEBUG
 print("Total Sample Time: ", max(x_meas)) #DEBUG
