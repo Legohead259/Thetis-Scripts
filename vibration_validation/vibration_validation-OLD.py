@@ -52,18 +52,17 @@ import numpy as np
 import pandas as pd
 
 # Constants and measurements
-SCOPE_OFFSET = -16.01        # Oscilloscope voltage measurement offset - V
-ACCELEROMETER_SCALE = 0.1 	# Measured value per g of acceleration by the accelerometer - V/g
-SCALE_FACTOR = 9.81 / ACCELEROMETER_SCALE # Convert oscilloscope voltage measurements to accelerations - m/s/s / V
+ALPHA = 5.296                       # Accelerometer sensitivity - mV/g
+BETA = 20                           # Amplifier gain - mV/V
+SCALE_FACTOR = BETA / ALPHA * 9.81 # Convert oscilloscope voltage measurements to accelerations - m/s/s / V
 
 
 # =================================
 # === READ IN OSCILLOSCOPE DATA ===
 # =================================
 
-df = pd.read_csv("vibration_validation/data/x-axis/x_scope_17_5Hz.CSV", names=["time", "voltage"])
+df = pd.read_csv("vibration_validation/data/x-axis/x_scope_3_6Hz.CSV", names=["time", "voltage"])
 df.time = df.time + abs(min(df.time)) # Shift all the time values such that they start at 0
-df.voltage = df.voltage - SCOPE_OFFSET # Shift all the voltage values bt the offset so they are detectable
 scope_accel = df.voltage * SCALE_FACTOR # Scale all the voltage values to accelerations
 
 
@@ -72,7 +71,7 @@ scope_accel = df.voltage * SCALE_FACTOR # Scale all the voltage values to accele
 # ===========================
 
 
-with open('vibration_validation/data/x-axis/x_thetis_17_5Hz.bin', 'rb') as file:
+with open('vibration_validation/data/x-axis/x_thetis_3_6Hz.bin', 'rb') as file:
     epoch_data = []
     raw_accel_data = []
     accel_data = []
@@ -87,9 +86,9 @@ with open('vibration_validation/data/x-axis/x_thetis_17_5Hz.bin', 'rb') as file:
 
 # Generate theoretical sinusoidal data
 # START_INDEX = 0
-START_INDEX = 249
+START_INDEX = 233
 # TIME_WIDTH = len(epoch_data)
-TIME_WIDTH = 39
+TIME_WIDTH = 22
 END_INDEX = START_INDEX + TIME_WIDTH
 
 x_meas = [epoch_data[START_INDEX + x]-epoch_data[START_INDEX] for x in range(TIME_WIDTH)]
@@ -107,7 +106,7 @@ x_meas = [x_meas[x].total_seconds() for x in range(TIME_WIDTH)]
 
 
 fig_comp = plt.figure(2)
-ax_comp = fig_comp.add_subplot(1,1,1)
+ax_comp = fig_comp.add_subplot(1,2,1)
 ax_comp.set_title("Comparison of Measured and Reference Accelerations")
 ax_comp.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
 # ax_comp.plot(x_meas, accel_data[START_INDEX:END_INDEX], 'o-')
@@ -116,13 +115,13 @@ ax_comp.set_xlabel("Time [s]")
 ax_comp.set_ylabel("Accelerations [m/s/s]")
 ax_comp.legend(["Thetis (Raw)", "Reference"])
 
-# ax_scale = fig_comp.add_subplot(1,2,2)
-# ax_scale.set_title("Comparison of Measured and Scaled Reference Accelerations")
-# ax_scale.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
-# ax_scale.plot(df.time, scope_accel*2.8)
-# ax_scale.set_xlabel("Time [s]")
-# ax_scale.set_ylabel("Accelerations [m/s/s]")
-# ax_scale.legend(["Thetis (Raw)", "Reference (x2.8)"])
+ax_scale = fig_comp.add_subplot(1,2,2)
+ax_scale.set_title("Comparison of Measured and Scaled Reference Accelerations")
+ax_scale.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
+ax_scale.plot(df.time, scope_accel*2.8)
+ax_scale.set_xlabel("Time [s]")
+ax_scale.set_ylabel("Accelerations [m/s/s]")
+ax_scale.legend(["Thetis (Raw)", "Reference (x2.8)"])
 
 print("Number of samples: ", len(epoch_data)) #DEBUG
 print("Total Sample Time: ", max(x_meas)) #DEBUG
