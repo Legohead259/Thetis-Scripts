@@ -64,6 +64,4 @@ def read_oscilloscope_data(path: str):
     df = pd.read_csv(path, names=["time", "voltage"])
     df.time = df.time + abs(min(df.time)) # Shift all the time values such that they start at 0
     print(df.time) # DEBUG
-    fig = plt.figure()
     
-
