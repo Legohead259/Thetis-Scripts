@@ -24,108 +24,241 @@ The waveform generator will create a sinusoidal waveform at a given frequency, f
 At lower frequencies, the vibration table is unable to generate a clean sine wave signal. Therefore, another accelerometer of known calibration was attached to the vibration table in the axis of movement to act as a ground truth reference. It is this ground truth that will be compared with the Thetis data to validate the instrument.
 Data is recorded from the accelerometer using the oscilloscope. These data files are saved as CSVs that can be plotted alongside the Thetis data.
 
-To plot the data appropriately, we need to scale both accelerations to the same scale. We will use the Thetis scale as the "true" scale and therefore need to convert the accelerometer readings (presented as V) to meters per second squared. We can use the known calibration constants for the accelerometer and in-line amplifier to accomplish this using the following equation:
-
-    a(t) [m/s/s] = ß [mV/V] / α [mV/g] * 9.81 [m/s/s / g] * V(t) [V]
 
 CHANGELOG:
  - Version 1.0: Initial Release
  - Version 2.0: Revamped to account for new testing procedure
+ - Version 3.0: Updated to automate processing for all datasets
 
 TODO:
+ - Save figure stats into a workbook/table
 """
 
 __author__      = "Braidan Duffy"
 __copyright__   = "Copyright 2022"
 __credits__     = "Braidan Duffy"
 __license__     = "MIT"
-__version__     = "2.0.0"
+__version__     = "3.0.0"
 __maintainer__  = "Braidan Duffy"
 __email__       = "bduffy2018@my.fit.edu"
 
+# Import libraries and declare constants
 from ctypes import sizeof
-from util import ThetisData, read_oscilloscope_data
+from util import ThetisData
 import matplotlib.pyplot as plt
 import datetime as dt
 from math import pi
 import numpy as np
 import pandas as pd
+from scipy import signal
+from os.path import exists
 
 # Constants and measurements
 SCOPE_OFFSET = -16.01        # Oscilloscope voltage measurement offset - V
 ACCELEROMETER_SCALE = 0.1 	# Measured value per g of acceleration by the accelerometer - V/g
 SCALE_FACTOR = 9.81 / ACCELEROMETER_SCALE # Convert oscilloscope voltage measurements to accelerations - m/s/s / V
+PLOT_OVERRIDE = False # Make TRUE to override already generated plots
 
+# List of axis names
+axis_names = ["x-axis"]
+N_AXES = len(axis_names)
+N_FREQUENCIES = len(pd.read_excel("data-table.xlsx", sheet_name="x-axis").Filename)
 
-# =================================
-# === READ IN OSCILLOSCOPE DATA ===
-# =================================
+sample_rate_mat = {}
+corrcoef_mat = {}
 
-df = pd.read_csv("vibration_validation/data/x-axis/x_scope_17_5Hz.CSV", names=["time", "voltage"])
-df.time = df.time + abs(min(df.time)) # Shift all the time values such that they start at 0
-df.voltage = df.voltage - SCOPE_OFFSET # Shift all the voltage values bt the offset so they are detectable
-scope_accel = df.voltage * SCALE_FACTOR # Scale all the voltage values to accelerations
+axis_count = 0
+for axis in axis_names:
+	# Read in data table information
+	df_data = pd.read_excel("data-table.xlsx", sheet_name=axis)
 
+	sample_rate_arr = []
+	corrcoef_arr = []
 
-# ===========================
-# === READ IN THETIS DATA ===
-# ===========================
+	freq_count = 0
+	for freq_name in df_data.Filename:
+		# Read in oscilloscope data
+		dn = "data/" + axis + "/" + axis[0]
+		fn = dn + "_scope_" + freq_name + ".CSV"
+		df = pd.read_csv(fn, names=["time", "voltage"])
+		df.time = df.time + abs(min(df.time)) # Shift all the time values such that they start at 0
+		df.voltage = df.voltage - SCOPE_OFFSET # Shift all the voltage values bt the offset so they are detectable
+		scope_accel = df.voltage * SCALE_FACTOR # Scale all the voltage values to accelerations
 
+		# Read in Thetis data
+		fn = dn + "_thetis_" + freq_name + ".bin" 
+		with open(fn, 'rb') as file:
+			epoch_data = []
+			raw_accel_data = []
+			accel_data = []
 
-with open('vibration_validation/data/x-axis/x_thetis_17_5Hz.bin', 'rb') as file:
-    epoch_data = []
-    raw_accel_data = []
-    accel_data = []
+			data = ThetisData()
+			while file.readinto(data) == sizeof(data):
+				timestamp = dt.datetime.utcfromtimestamp(data.epoch) + dt.timedelta(milliseconds=data.mSecond)
+				epoch_data.append(timestamp)
+				raw_accel_data.append(-data.rawAccelX)
+				# accel_data.append((data.accelX, data.accelY, data.accelZ))
+				accel_data.append(data.accelX)
+		epoch_data = np.array(epoch_data)
+		raw_accel_data = np.array(raw_accel_data)
 
-    data = ThetisData()
-    while file.readinto(data) == sizeof(data):
-        timestamp = dt.datetime.utcfromtimestamp(data.epoch) + dt.timedelta(milliseconds=data.mSecond)
-        epoch_data.append(timestamp)
-        raw_accel_data.append((data.rawAccelX))
-        # accel_data.append((data.accelX, data.accelY, data.accelZ))
-        accel_data.append(data.accelX)
+		# Generate raw data plots
+		START_INDEX = df_data.Start[freq_count]
+		TIME_WIDTH = df_data.Length[freq_count]
+		END_INDEX = START_INDEX + TIME_WIDTH
 
-# Generate theoretical sinusoidal data
-# START_INDEX = 0
-START_INDEX = 249
-# TIME_WIDTH = len(epoch_data)
-TIME_WIDTH = 39
-END_INDEX = START_INDEX + TIME_WIDTH
+		x_meas = epoch_data[START_INDEX:END_INDEX] # Partition examined data into sub array
+		x_meas = x_meas - x_meas[0] # Zero all the timestamps relative to the first value
+		x_meas = [x_meas[x].total_seconds() for x in range(np.size(x_meas))] # Convert datetime timestamps to seconds
 
-x_meas = [epoch_data[START_INDEX + x]-epoch_data[START_INDEX] for x in range(TIME_WIDTH)]
-x_meas = [x_meas[x].total_seconds() for x in range(TIME_WIDTH)]
+		# Make Acceleration plots if the plots don't exist or PLOT_OVERRIDE is true
+		dn = "output/" + axis + "/accel_comps/" + axis[0]
+		fn = dn + "_accel_comp_" + freq_name + ".png"
+		if (not exists(fn) or PLOT_OVERRIDE):
+			fig_comp, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,10))
+			fig_comp.suptitle(f"Frequency = {freq_name}".replace('_', '.'))
 
-# Make plots
-# fig_accel = plt.figure(1)
-# ax_accel = fig_accel.add_subplot(1,1,1)
-# ax_accel.set_title("Comparison of Raw and Filtered Accelerations")
-# ax_accel.plot(epoch_data, raw_accel_data)
-# ax_accel.plot(epoch_data, accel_data)
-# ax_accel.set_xlabel("Timestamp")
-# ax_accel.set_ylabel("Accelerations [m/s/s]")
-# ax_accel.legend(["Raw", "Kalman Filtered"])
+			ax1.set_title("Raw Acceleration Versus Time")
+			ax1.plot(epoch_data, raw_accel_data)
+			ax1.axvline(epoch_data[START_INDEX], linestyle='--', color='r')
+			ax1.axvline(epoch_data[END_INDEX], linestyle='--', color='r')
+			ax1.set_xlabel("Timestamp")
+			ax1.set_ylabel("Accelerations [m/s/s]")
+			ax1.legend(["Raw"])
 
+			ax2 = fig_comp.add_subplot(2,1,2)
+			ax2.set_title("Comparison of Measured and Reference Accelerations" )
+			ax2.plot(df.time, scope_accel)
+			ax2.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
+			ax2.set_xlabel("Time [s]")
+			ax2.set_ylabel("Accelerations [m/s/s]")
+			ax2.legend(["Reference", "Thetis"])
 
-fig_comp = plt.figure(2)
-ax_comp = fig_comp.add_subplot(1,1,1)
-ax_comp.set_title("Comparison of Measured and Reference Accelerations")
-ax_comp.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
-# ax_comp.plot(x_meas, accel_data[START_INDEX:END_INDEX], 'o-')
-ax_comp.plot(df.time, scope_accel)
-ax_comp.set_xlabel("Time [s]")
-ax_comp.set_ylabel("Accelerations [m/s/s]")
-ax_comp.legend(["Thetis (Raw)", "Reference"])
+			# Save acceleration plots
+			plt.savefig(fn)
+			plt.close(fig_comp)
+			plt.clf()
 
-# ax_scale = fig_comp.add_subplot(1,2,2)
-# ax_scale.set_title("Comparison of Measured and Scaled Reference Accelerations")
-# ax_scale.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
-# ax_scale.plot(df.time, scope_accel*2.8)
-# ax_scale.set_xlabel("Time [s]")
-# ax_scale.set_ylabel("Accelerations [m/s/s]")
-# ax_scale.legend(["Thetis (Raw)", "Reference (x2.8)"])
+		n_samples = len(epoch_data)
+		sample_time = np.max(df.time)
+		sample_rate = len(x_meas) / np.max(x_meas)
+		sample_rate_arr.append(round(sample_rate))
 
-print("Number of samples: ", len(epoch_data)) #DEBUG
-print("Total Sample Time: ", max(x_meas)) #DEBUG
-print("Average Sample Rate: ", len(epoch_data) / max(x_meas)) #DEBUG
+		# print("Number of samples: ", n_samples) #DEBUG
+		# print("Total Sample Time: ", sample_time) #DEBUG
+		# print("Average Sample Rate: ", round(sample_rate)) #DEBUG
 
-plt.show()
+		# Remove high frequency noise
+		sos = signal.butter(4, 24, 'lp', fs=1E4, output='sos')
+		filtered = signal.sosfiltfilt(sos, scope_accel)
+
+		# Make frequency response plot if it doesn't already exist
+		fn = "output/filter_response.png"
+		if (not exists(fn)):
+			w, h = signal.sosfreqz(sos, worN=1500)
+			fig_filt_resp, (ax1, ax2) = plt.subplots(2,1, figsize=(8,5))
+			db = 20*np.log10(np.maximum(np.abs(h), 1e-5))
+			fig_filt_resp.suptitle('Frequency Response')
+			fig_filt_resp.supxlabel('Normalized frequency (1.0 = 5000Hz)')
+
+			ax1.plot(w/np.pi*5000, db)
+			ax1.set_ylim(-75, 5)
+			ax1.set_xlim(0, 200)
+			ax1.grid(True)
+			ax1.set_yticks([0, -20, -40, -60])
+			ax1.set_ylabel('Gain [dB]')
+			
+			ax2.plot(w/np.pi*5000, np.angle(h))
+			ax2.grid(True)
+			ax2.set_yticks([-np.pi, -0.5*np.pi, 0, 0.5*np.pi, np.pi],
+					[r'$-\pi$', r'$-\pi/2$', '0', r'$\pi/2$', r'$\pi$'])
+			ax2.set_xlim(0, 200)
+			ax2.set_ylabel('Phase [rad]')
+
+			plt.savefig(fn)
+			plt.close(fig_filt_resp)
+			plt.clf()
+
+		# Make filtered plots if they don't already exist or PLOT_OVERRIDE is True
+		dn = "output/" + axis + "/filt_comps/" + axis[0]
+		fn = dn + "_filt_comp_" + freq_name + ".png"
+		if (not exists(fn) or PLOT_OVERRIDE):
+			fig_filt, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(8,4))
+			fig_filt.suptitle(f"Frequency = {freq_name}".replace('_', '.'))
+
+			ax1.set_title("Comparison of Unfiltered and Filtered Accelerations")
+			ax1.plot(df.time, scope_accel)
+			ax1.set_xlabel("Time [s]")
+			ax1.set_ylabel("Accelerations [m/s/s]")
+			ax2.plot(df.time, filtered)
+			ax2.plot(x_meas, raw_accel_data[START_INDEX:END_INDEX], 'o-')
+			ax2.legend(["Reference (Filtered)", "Thetis"])
+		
+			plt.savefig(fn)
+			plt.close(fig_filt)
+			plt.clf()
+
+		# Run statistical analysis
+		# Create an interpolated time series vector from [0, max(x_ref)] of 50 values
+		x_interp = np.linspace(0, max(df.time), 50)
+
+		# Interpolate the different time series
+		scope_accel_interp = np.interp(x_interp, df.time, filtered)
+		raw_accel_data_interp = np.interp(x_interp, x_meas, raw_accel_data[START_INDEX:END_INDEX])
+
+		# Plot interpolated time series if they don't already exist or PLOT_OVERRIDE is True
+		dn = "output/" + axis + "/corr_comps/" + axis[0]
+		fn = dn + "_corr_comp_" + freq_name + ".png"
+		if (not exists(fn) or PLOT_OVERRIDE):
+			fig_interp, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,10))
+			fig_interp.suptitle(f"Frequency = {freq_name}".replace('_', '.'))
+
+			ax1.set_title("Comparison of Interpolated Measured and Reference Accelerations")
+			ax1.plot(x_interp, scope_accel_interp)
+			ax1.plot(x_interp, raw_accel_data_interp, 'o-')
+			ax1.set_xlabel("Time [s]")
+			ax1.set_ylabel("Accelerations [m/s/s]")
+			ax1.legend(["Reference", "Thetis (Raw)"])
+
+			ax2.set_title("Correlation of Interpolated Measured and Reference Accelerations")
+			ax2.plot(scope_accel_interp, raw_accel_data_interp, 'o')
+			x = np.linspace(ax2.get_xlim()[0], ax2.get_xlim()[1])
+			ax2.plot(x, x, '--', color='red')
+			ax2.set_xlabel("Reference Accelerometer [m/s/s]")
+			ax2.set_ylabel("Thetis Accelerometer [m/s/s]")
+			
+			# Save figure
+			plt.savefig(fn)
+			plt.close(fig_interp)
+			plt.clf()
+
+		# Calculate correlation coefficients
+		accel_mat = np.array([scope_accel_interp, raw_accel_data_interp])
+		corrcoef = np.corrcoef(accel_mat)
+		corrcoef_arr.append(round(corrcoef[0,1], 2))
+		# print("Correlation Coefficient: ", round(corrcoef[0,1],2)) # DEBUG
+
+		freq_count += 1
+	sample_rate_mat[axis] = sample_rate_arr
+	corrcoef_mat[axis] = corrcoef_arr
+	print(sample_rate_mat) # DEBUG
+	print(corrcoef_mat) # DEBUG
+
+	# Create plot to show correlation as a function of frequency if the plots don't already exist or PLOT_OVERRIDE is True
+	fn = f"output/{axis}/{axis[0]}_corr_freq.png"
+	if (not exists(fn) or PLOT_OVERRIDE):
+		fig_corr_freq = plt.figure(figsize=(8,4))
+		ax = fig_corr_freq.add_subplot(1,1,1)
+		ax.set_title(f"{axis} Correlation Coefficient Versus Frequency")
+		ax.plot(df_data.Frequency, corrcoef_arr, 'o')
+		ax.axhline(0.75, linestyle='--', color='green')
+		ax.axvline(16, linestyle='--', color='red', alpha=0.5)
+		# ax.grid()
+		ax.set_xlabel("Frequency [Hz]")
+		ax.set_ylabel("Correlation Coefficient")
+		ax.legend(["", "Correlation Limit", "16 Hz Cutoff"])
+
+		# Save figure
+		plt.savefig(fn)
+		plt.close(fig_corr_freq)
+		plt.clf()
