@@ -5,10 +5,10 @@ import argparse
 
 # define the format of the binary data file
 # replace with actual format of the binary data file
-fmt = 'lLHBBBBBBf?BBllllBBBBfffffffffffffffffffffffffffffBxxx'
+fmt = 'lL?BBllllfffffffffffffffffBf'
 
 data_size = struct.calcsize(fmt)
-# print(data_size) # DEBUG
+print(data_size) # DEBUG
 
 
 def create_raw_dump(f, path="", filename="raw_data.csv"):
@@ -70,6 +70,7 @@ def create_imu_dump(f, path="", filename="imu_data.csv"):
                     break
                 # Unpack the binary data
                 fields = struct.unpack(fmt, binary_data)
+                print(fields)
                 # Format the timestamp into ISO8601
                 dt = datetime.datetime.fromtimestamp(fields[0] + (fields[1] / 1000))
                 fields = (dt.isoformat(),) + fields[17:39] + fields[42:45]
