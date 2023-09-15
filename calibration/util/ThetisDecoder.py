@@ -4,7 +4,7 @@ import pandas as pd
 class Decoder():
     DATA_FORMAT = 'lL?BBllllfffffffffffffffffBf'
     DATA_SIZE = struct.calcsize(DATA_FORMAT)
-
+    DATA_FRAME_HEADERS = ["Timestamp (ms)", ""]
     _source_path : str
     _output_dir : str
     
@@ -16,7 +16,11 @@ class Decoder():
         
     @property
     def acceleration(self):
-        return Decoder.decode(self._source_path).iloc[:, [0, 8, 9, 10]]
+        return self.decode().iloc[:, [0, 8, 9, 10]]
+    
+    @property
+    def rotation_rate(self):
+        return self.decode().iloc[:, [0, 11, 12, 13]]
         
     def decode(self):
         if not self._dataFrame:
