@@ -4,8 +4,8 @@ from scipy.optimize import minimize
 # Example data (replace with your actual values)
 num_samples = 5  # Adjust the number of samples as needed
 
-I_u_list = [np.random.rand(1, 3) for _ in range(num_samples)]
-I_ref_list = [np.random.rand(1, 3) for _ in range(num_samples)]
+I_u_list = [np.random.rand() for _ in range(num_samples)]
+I_ref_list = [np.random.rand() for _ in range(num_samples)]
 
 # Calculate average component values across all I_u vectors
 bias = np.mean(np.array([u[0] for u in I_u_list]), axis=0)
